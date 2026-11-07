@@ -44,7 +44,14 @@ FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
 
 /* USER CODE BEGIN PV */
+CANHandle_t CANHandle = &hfdcan2;
+CANDevice_t CANDevice = {
+		.motorDomain = 1,
+		.deviceUUID = CAN_UUID_BLDC_ELBOW
+};
+CANPacket_t RxPacket;
 
+volatile bool estopActive = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -93,7 +100,7 @@ int main(void)
   MX_FDCAN1_Init();
   MX_FDCAN2_Init();
   /* USER CODE BEGIN 2 */
-
+  CANInit(CANHandle, &CANDevice);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -103,6 +110,45 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+	  if (CANPollAndReceive(CANHandle, &RxPacket)) {
+		  RxPacket.device.deviceUUID &= 0x3F;
+		  int ack = RxPacket.command & 0x80;
+
+		  switch (RxPacket.command & 0x7F) {
+		  case CAN_COMMAND_ID__VERSION_GET: {
+			  if (ack) {
+				  CANUniversalPacket_GetFirmwareVersion_Decoded_t decoded =
+						  CANUniversalPacket_GetFirmwareVersion_Decode(&RxPacket);
+				  CANPacket_t response = CANUniversalPacket_FirmwareVersion(
+						  decoded.receiver, decoded.sender, "elbw", 1);
+				  CANSend(CANHandle, &response);
+			  }
+			  break;
+		  }
+		  case CAN_COMMAND_ID__E_STOP: {
+			  CANUniversalPacket_EStop_Decoded_t decoded =
+					  CANUniversalPacket_EStop_Decode(&RxPacket);
+			  (void)decoded;
+			  estopActive = true;
+			  if (ack) {
+				  CANPacket_t response = CANUniversalPacket_Acknowledge(
+						  decoded.receiver, decoded.sender, false, (CANCommand_t)(RxPacket.command & 0x7F));
+				  CANSend(CANHandle, &response);
+			  }
+			  break;
+		  }
+		  default:
+			  if (ack) {
+				  CANPacket_t response = CANUniversalPacket_Acknowledge(
+						  RxPacket.device,
+						  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+						  true,
+						  (CANCommand_t)(RxPacket.command & 0x7F));
+				  CANSend(CANHandle, &response);
+			  }
+			  break;
+		  }
+	  }
   }
   /* USER CODE END 3 */
 }
@@ -220,7 +266,7 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.DataSyncJumpWidth = 1;
   hfdcan2.Init.DataTimeSeg1 = 1;
   hfdcan2.Init.DataTimeSeg2 = 1;
-  hfdcan2.Init.StdFiltersNbr = 0;
+  hfdcan2.Init.StdFiltersNbr = 8;
   hfdcan2.Init.ExtFiltersNbr = 0;
   hfdcan2.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan2) != HAL_OK)

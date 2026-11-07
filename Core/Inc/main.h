@@ -31,6 +31,12 @@ extern "C" {
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "CANPacket.h"
+#include "CANDevices.h"
+#include "Ports/Port.h"
+#include "CANCommandIDs.h"
+#include "Packets/Universal.h"
+#include "Packets/DecodeUniversal.h"
 
 /* USER CODE END Includes */
 
