@@ -44,12 +44,23 @@ FDCAN_HandleTypeDef hfdcan1;
 FDCAN_HandleTypeDef hfdcan2;
 
 /* USER CODE BEGIN PV */
+// CAN26 Variables
 CANHandle_t CANHandle = &hfdcan2;
 CANDevice_t CANDevice = {
 		.motorDomain = 1,
 		.deviceUUID = CAN_UUID_BLDC_ELBOW
 };
 CANPacket_t RxPacket;
+
+// CubeMars Variables
+CubeMarsConfig cubeMarsConfig = {
+		.controller_id = 1,
+		.pole_pairs = AK60_39_POLE_PAIRS,
+		.gear_ratio = AK60_39_GEAR_RATIO,
+		.input_is_joint_speed = false,
+		.max_abs_erpm = 50000
+};
+CubeMarsFrame motorRxFrame;
 
 volatile bool estopActive = false;
 /* USER CODE END PV */
@@ -101,6 +112,10 @@ int main(void)
   MX_FDCAN2_Init();
   /* USER CODE BEGIN 2 */
   CANInit(CANHandle, &CANDevice);
+
+  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+	  Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -137,6 +152,60 @@ int main(void)
 			  }
 			  break;
 		  }
+		  case CAN_COMMAND_ID__BLDC_INPUT_VELOCITY: {
+			  if (estopActive) {
+				  if (ack) {
+					  CANPacket_t response = CANUniversalPacket_Acknowledge(
+							  RxPacket.device,
+							  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+							  true,
+							  (CANCommand_t)(RxPacket.command & 0x7F));
+					  CANSend(CANHandle, &response);
+				  }
+				  break;
+			  }
+
+			  // motorFrame using translation
+			  CubeMarsFrame motorFrame;
+			  bool ok = CAN26ToCubeMarsServoVelocity(&RxPacket, &cubeMarsConfig, &motorFrame);
+
+			  if (ok) {
+				  FDCAN_TxHeaderTypeDef txHeader = {0};
+				  txHeader.Identifier = motorFrame.id; // 29-bit CAN ID
+				  txHeader.IdType = motorFrame.extended ? FDCAN_EXTENDED_ID : FDCAN_STANDARD_ID;
+
+				  txHeader.TxFrameType = FDCAN_DATA_FRAME;
+				  txHeader.DataLength = FDCAN_DLC_BYTES_4; // Servo SET_RPM is 4 bytes of big-endian speed
+				  txHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+				  txHeader.BitRateSwitch = FDCAN_BRS_OFF;
+				  txHeader.FDFormat = FDCAN_CLASSIC_CAN;
+				  txHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+				  txHeader.MessageMarker = 0;
+
+				  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan1, &txHeader, motorFrame.data) != HAL_OK) {
+					  if (ack) {
+						  CANPacket_t response = CANUniversalPacket_Acknowledge(
+								  RxPacket.device,
+								  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID},
+								  true,
+								  (CANCommand_t)(RxPacket.command & 0x7f));
+						  CANSend(CANHandle, &response);
+					  }
+					  break;
+				  }
+
+
+			  } if (ack) {
+				  CANPacket_t response = CANUniversalPacket_Acknowledge(
+						  RxPacket.device,
+						  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+						  false,
+						  (CANCommand_t)(RxPacket.command & 0x7F));
+				  CANSend(CANHandle, &response);
+			  }
+			  break;
+		  }
+
 		  default:
 			  if (ack) {
 				  CANPacket_t response = CANUniversalPacket_Acknowledge(
@@ -212,19 +281,19 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.ClockDivider = FDCAN_CLOCK_DIV1;
   hfdcan1.Init.FrameFormat = FDCAN_FRAME_CLASSIC;
   hfdcan1.Init.Mode = FDCAN_MODE_NORMAL;
-  hfdcan1.Init.AutoRetransmission = DISABLE;
+  hfdcan1.Init.AutoRetransmission = ENABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 2;
+  hfdcan1.Init.NominalPrescaler = 1;
   hfdcan1.Init.NominalSyncJumpWidth = 4;
-  hfdcan1.Init.NominalTimeSeg1 = 27;
-  hfdcan1.Init.NominalTimeSeg2 = 4;
+  hfdcan1.Init.NominalTimeSeg1 = 5;
+  hfdcan1.Init.NominalTimeSeg2 = 2;
   hfdcan1.Init.DataPrescaler = 1;
-  hfdcan1.Init.DataSyncJumpWidth = 1;
+  hfdcan1.Init.DataSyncJumpWidth = 2;
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
   hfdcan1.Init.StdFiltersNbr = 0;
-  hfdcan1.Init.ExtFiltersNbr = 0;
+  hfdcan1.Init.ExtFiltersNbr = 8;
   hfdcan1.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   if (HAL_FDCAN_Init(&hfdcan1) != HAL_OK)
   {

@@ -37,6 +37,8 @@ extern "C" {
 #include "CANCommandIDs.h"
 #include "Packets/Universal.h"
 #include "Packets/DecodeUniversal.h"
+#include "CubeMarsServo.h"
+#include "CAN26CubeMars.h"
 
 /* USER CODE END Includes */
 
