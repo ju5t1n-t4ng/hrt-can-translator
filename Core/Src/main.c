@@ -113,8 +113,28 @@ int main(void)
   /* USER CODE BEGIN 2 */
   CANInit(CANHandle, &CANDevice);
 
-  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
-	  Error_Handler();
+  // FDCAN1 RX FIFO0 Filters
+  {
+	  FDCAN_FilterTypeDef motorFilter = {0};
+	  motorFilter.IdType = FDCAN_EXTENDED_ID;
+	  motorFilter.FilterIndex = 0;
+	  motorFilter.FilterType = FDCAN_FILTER_MASK;
+	  motorFilter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+	  motorFilter.FilterID1 = ((uint32_t)0x29u << 8) | (uint32_t)cubeMarsConfig.controller_id;
+	  motorFilter.FilterID2 = 0x1FFFFFFFu;
+
+	  if (HAL_FDCAN_ConfigFilter(&hfdcan1, &motorFilter) != HAL_OK) {
+		  Error_Handler();
+	  }
+	  if (HAL_FDCAN_ConfigGlobalFilter(
+			  &hfdcan1,
+			  FDCAN_REJECT, FDCAN_REJECT,
+			  FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE) != HAL_OK) {
+		  Error_Handler();
+	  }
+	  if (HAL_FDCAN_Start(&hfdcan1) != HAL_OK) {
+		  Error_Handler();
+	  }
   }
   /* USER CODE END 2 */
 
@@ -194,12 +214,19 @@ int main(void)
 					  break;
 				  }
 
-
-			  } if (ack) {
+				  if (ack) {
+					  CANPacket_t response = CANUniversalPacket_Acknowledge(
+							  RxPacket.device,
+					          (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+					          false,
+					          (CANCommand_t)(RxPacket.command & 0x7F));
+					  CANSend(CANHandle, &response);
+				  }
+			  } else if (ack) {
 				  CANPacket_t response = CANUniversalPacket_Acknowledge(
 						  RxPacket.device,
 						  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
-						  false,
+						  true,
 						  (CANCommand_t)(RxPacket.command & 0x7F));
 				  CANSend(CANHandle, &response);
 			  }
@@ -216,6 +243,24 @@ int main(void)
 				  CANSend(CANHandle, &response);
 			  }
 			  break;
+		  }
+	  }
+
+	  // FDCAN1 poll
+	  if (HAL_FDCAN_GetRxFifoFillLevel(&hfdcan1, FDCAN_RX_FIFO0) > 0u) {
+		  FDCAN_RxHeaderTypeDef rxHeader;
+		  uint8_t rxData[8];
+
+		  if(HAL_FDCAN_GetRxMessage(&hfdcan1, FDCAN_RX_FIFO0, &rxHeader, rxData) == HAL_OK) {
+			  motorRxFrame.id = rxHeader.Identifier;
+			  motorRxFrame.extended = (rxHeader.IdType == FDCAN_EXTENDED_ID);
+			  motorRxFrame.length = (uint8_t)(rxHeader.DataLength & 0x0Fu);
+			  if (motorRxFrame.length > 8u) {
+				  motorRxFrame.length = 8u;
+			  }
+			  for (uint8_t i = 0; i < motorRxFrame.length; i++) {
+				  motorRxFrame.data[i] = rxData[i];
+			  }
 		  }
 	  }
   }
@@ -238,7 +283,8 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
@@ -285,11 +331,11 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
   hfdcan1.Init.NominalPrescaler = 1;
-  hfdcan1.Init.NominalSyncJumpWidth = 4;
+  hfdcan1.Init.NominalSyncJumpWidth = 2;
   hfdcan1.Init.NominalTimeSeg1 = 5;
   hfdcan1.Init.NominalTimeSeg2 = 2;
   hfdcan1.Init.DataPrescaler = 1;
-  hfdcan1.Init.DataSyncJumpWidth = 2;
+  hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
   hfdcan1.Init.DataTimeSeg2 = 1;
   hfdcan1.Init.StdFiltersNbr = 0;
@@ -360,6 +406,7 @@ static void MX_GPIO_Init(void)
   /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOF_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
