@@ -1,2 +1,2 @@
 # hrt-can-translator
-Private repo for HRT CAN Translator (elbow)
+Personal repo for HRT CAN Translator (elbow)
