@@ -39,6 +39,8 @@ extern "C" {
 #include "Packets/DecodeUniversal.h"
 #include "CubeMarsServo.h"
 #include "CAN26CubeMars.h"
+#include "CubeMarsFeedback.h"
+#include "CAN26CubeMarsFeedback.h"
 
 /* USER CODE END Includes */
 

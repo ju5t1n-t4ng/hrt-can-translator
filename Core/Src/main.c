@@ -61,6 +61,8 @@ CubeMarsConfig cubeMarsConfig = {
 		.max_abs_erpm = 50000
 };
 CubeMarsFrame motorRxFrame;
+CubeMarsServoFeedback motorFeedback;
+volatile bool motorFeedbackValid = false;
 
 volatile bool estopActive = false;
 /* USER CODE END PV */
@@ -233,6 +235,42 @@ int main(void)
 			  break;
 		  }
 
+		  case CAN_COMMAND_ID__BLDC_ENCODER_ESTIMATE_GET: {
+			  if (ack) {
+				  CANPacket_t response;
+				  bool ok = CAN26ReplyToEncoderEstimateRequest(
+						  &RxPacket,
+				          &motorRxFrame,
+				          motorFeedbackValid,
+				          &cubeMarsConfig,
+				          true,
+				          &response);
+				  if (ok) {
+					  CANSend(CANHandle, &response);
+				  } else {
+					  CANPacket_t nack = CANUniversalPacket_Acknowledge(
+							  RxPacket.device,
+							  (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+							  true,
+							  (CANCommand_t)(RxPacket.command & 0x7F));
+					  CANSend(CANHandle, &nack);
+				  }
+			  }
+			  break;
+		  }
+		  case CAN_COMMAND_ID__RESET: {
+		      estopActive = false;
+		      if (ack) {
+		          CANPacket_t response = CANUniversalPacket_Acknowledge(
+		        		  RxPacket.device,
+		              (CANDevice_t){ .deviceUUID = RxPacket.senderUUID },
+		              false,
+		              (CANCommand_t)(RxPacket.command & 0x7F));
+		          CANSend(CANHandle, &response);
+		      }
+		      break;
+		  }
+
 		  default:
 			  if (ack) {
 				  CANPacket_t response = CANUniversalPacket_Acknowledge(
@@ -261,6 +299,11 @@ int main(void)
 			  for (uint8_t i = 0; i < motorRxFrame.length; i++) {
 				  motorRxFrame.data[i] = rxData[i];
 			  }
+
+			  motorFeedbackValid = CubeMarsDecodeServoFeedback(
+					  &motorRxFrame,
+					  cubeMarsConfig.controller_id,
+					  &motorFeedback);
 		  }
 	  }
   }
@@ -284,7 +327,7 @@ void SystemClock_Config(void)
   * in the RCC_OscInitTypeDef structure.
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
